@@ -125,57 +125,53 @@
   </div>
 
   <script>
-  const voteApiUrl = __VOTE_API_URL__;
-  // Leave empty if backend is not connected to avoid fetch errors
-
-  let manifest = [];
-
-  const metaEl = document.getElementById("meta");
-  const voteSection = document.getElementById("vote-section");
-  const doneSection = document.getElementById("done-section");
-
-  const leftImg = document.getElementById("left-img");
-  const rightImg = document.getElementById("right-img");
-  const leftLabel = document.getElementById("left-label");
-  const rightLabel = document.getElementById("right-label");
-  const voteLeftBtn = document.getElementById("vote-left");
-  const voteRightBtn = document.getElementById("vote-right");
-
-  function getOrCreateUserId() {
-    let uid = localStorage.getItem("vote_user_id");
-    if (!uid) {
-      uid = crypto.randomUUID();
-      localStorage.setItem("vote_user_id", uid);
-    }
-    return uid;
-  }
-
-  function getVotedPairs() {
-    return JSON.parse(localStorage.getItem("voted_pairs") || "[]");
-  }
-
-  function setVotedPair(pairId) {
-    const voted = new Set(getVotedPairs());
-    voted.add(pairId);
-    localStorage.setItem("voted_pairs", JSON.stringify([...voted]));
-  }
-
-  function getRemainingPairs(allPairs) {
-    const voted = new Set(getVotedPairs());
-    return allPairs.filter(p => !voted.has(p.pair_id));
-  }
-
   function renderCurrentPair() {
+    if (!Array.isArray(manifest)) {
+      metaEl.textContent = "Error: manifest is not an array.";
+      return;
+    }
+
+    if (manifest.length === 0) {
+      metaEl.textContent = "Error: manifest.json is empty ([]).";
+      return;
+    }
+
     const remaining = getRemainingPairs(manifest);
 
     if (remaining.length === 0) {
       localStorage.removeItem("voted_pairs");
+      const again = getRemainingPairs(manifest);
 
-      renderCurrentPair();
+      if (again.length === 0) {
+        metaEl.textContent = "Error: manifest exists, but no valid pairs can be rendered.";
+        return;
+      }
+    }
+
+    const pair = getRemainingPairs(manifest)[0];
+
+    if (!pair) {
+      metaEl.textContent = "Error: no pair found.";
       return;
     }
 
-    const pair = remaining[0];
+    const required = [
+      "pair_id",
+      "sample_id",
+      "left",
+      "right",
+      "version_left",
+      "version_right",
+      "type",
+      "group",
+      "display_index"
+    ];
+
+    const missing = required.filter(k => !(k in pair));
+    if (missing.length > 0) {
+      metaEl.textContent = "Error: first pair is missing fields: " + missing.join(", ");
+      return;
+    }
 
     metaEl.textContent = "";
 
@@ -193,7 +189,6 @@
 
     voteLeftBtn.onclick = leftHandler;
     voteRightBtn.onclick = rightHandler;
-
     leftImg.onclick = leftHandler;
     rightImg.onclick = rightHandler;
 
@@ -204,84 +199,42 @@
     doneSection.classList.add("hidden");
   }
 
-  async function submitVote(pair, choice) {
-    const chosenVersion =
-      choice === "left" ? pair.version_left : pair.version_right;
-
-    const payload = {
-      user_id: getOrCreateUserId(),
-      pair_id: pair.pair_id,
-      sample_id: pair.sample_id,
-      choice: choice,
-      chosen_version: chosenVersion,
-      left: pair.left,
-      right: pair.right,
-      type: pair.type,
-      group: pair.group,
-      version_left: pair.version_left,
-      version_right: pair.version_right,
-      display_index: pair.display_index,
-      timestamp: new Date().toISOString()
-    };
-
-    try {
-      if (voteApiUrl) {
-        const resp = await fetch(voteApiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-
-        if (!resp.ok) {
-          throw new Error(`Backend returned status ${resp.status}`);
-        }
-      }
-
-      setVotedPair(pair.pair_id);
-
-      leftLabel.textContent = `Left: ${pair.version_left}`;
-      rightLabel.textContent = `Right: ${pair.version_right}`;
-
-      if (choice === "left") {
-        voteLeftBtn.textContent = `You chose Left (${pair.version_left})`;
-        voteRightBtn.textContent = "Not selected";
-      } else {
-        voteRightBtn.textContent = `You chose Right (${pair.version_right})`;
-        voteLeftBtn.textContent = "Not selected";
-      }
-
-      voteLeftBtn.disabled = true;
-      voteRightBtn.disabled = true;
-      leftImg.onclick = null;
-      rightImg.onclick = null;
-
-      setTimeout(() => {
-        voteLeftBtn.disabled = false;
-        voteRightBtn.disabled = false;
-        renderCurrentPair();
-      }, 1000);
-
-    } catch (err) {
-      alert("Submission failed: " + err.message);
-      console.error(err);
-    }
-  }
-
   async function init() {
     try {
-      const resp = await fetch("https://einsam1819.github.io/compareimg.io/manifest.json");
+      metaEl.textContent = "Loading manifest...";
+
+      const manifestUrl = new URL("manifest.json", window.location.href).href;
+      console.log("Manifest URL:", manifestUrl);
+
+      const resp = await fetch(manifestUrl, { cache: "no-store" });
+
       if (!resp.ok) {
-        throw new Error(`Failed to load manifest: ${resp.status}`);
+        throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
       }
-      manifest = await resp.json();
+
+      const text = await resp.text();
+      console.log("Raw manifest text:", text);
+
+      if (!text.trim()) {
+        throw new Error("manifest.json is empty file");
+      }
+
+      manifest = JSON.parse(text);
+
+      console.log("Parsed manifest:", manifest);
+
+      metaEl.textContent = `Manifest loaded. Count: ${
+        Array.isArray(manifest) ? manifest.length : "not array"
+      }`;
+
       renderCurrentPair();
     } catch (err) {
-      metaEl.textContent = "Failed to load manifest.json";
-      console.error(err);
+      console.error("INIT ERROR:", err);
+      metaEl.textContent = "Init failed: " + err.message;
     }
   }
 
   init();
-  </script>
+</script>
 </body>
 </html>
