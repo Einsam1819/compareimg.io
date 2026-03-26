@@ -1,0 +1,9 @@
+{
+  "name": "image-vote-scf",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "cos-nodejs-sdk-v5": "^2.14.5"
+  }
+}
