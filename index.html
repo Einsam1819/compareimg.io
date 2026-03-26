@@ -125,7 +125,8 @@
   </div>
 
   <script>
-  const voteApiUrl = "https://1324234772-0xoqg4rpth.ap-singapore.tencentscf.com";
+  const voteApiUrl = __VOTE_API_URL__;
+  // Leave empty if backend is not connected to avoid fetch errors
 
   let manifest = [];
 
@@ -162,6 +163,45 @@
   function getRemainingPairs(allPairs) {
     const voted = new Set(getVotedPairs());
     return allPairs.filter(p => !voted.has(p.pair_id));
+  }
+
+  function renderCurrentPair() {
+    const remaining = getRemainingPairs(manifest);
+
+    if (remaining.length === 0) {
+      localStorage.removeItem("voted_pairs");
+
+      renderCurrentPair();
+      return;
+    }
+
+    const pair = remaining[0];
+
+    metaEl.textContent = "";
+
+    leftImg.src = pair.left;
+    rightImg.src = pair.right;
+
+    leftLabel.textContent = "";
+    rightLabel.textContent = "";
+
+    voteLeftBtn.textContent = "Choose Left";
+    voteRightBtn.textContent = "Choose Right";
+
+    const leftHandler = () => submitVote(pair, "left");
+    const rightHandler = () => submitVote(pair, "right");
+
+    voteLeftBtn.onclick = leftHandler;
+    voteRightBtn.onclick = rightHandler;
+
+    leftImg.onclick = leftHandler;
+    rightImg.onclick = rightHandler;
+
+    leftImg.style.cursor = "pointer";
+    rightImg.style.cursor = "pointer";
+
+    voteSection.classList.remove("hidden");
+    doneSection.classList.add("hidden");
   }
 
   async function submitVote(pair, choice) {
@@ -226,116 +266,22 @@
       console.error(err);
     }
   }
-  function renderCurrentPair() {
-    if (!Array.isArray(manifest)) {
-      metaEl.textContent = "Error: manifest is not an array.";
-      return;
-    }
-
-    if (manifest.length === 0) {
-      metaEl.textContent = "Error: manifest.json is empty ([]).";
-      return;
-    }
-
-    const remaining = getRemainingPairs(manifest);
-
-    if (remaining.length === 0) {
-      localStorage.removeItem("voted_pairs");
-      const again = getRemainingPairs(manifest);
-
-      if (again.length === 0) {
-        metaEl.textContent = "Error: manifest exists, but no valid pairs can be rendered.";
-        return;
-      }
-    }
-
-    const pair = getRemainingPairs(manifest)[0];
-
-    if (!pair) {
-      metaEl.textContent = "Error: no pair found.";
-      return;
-    }
-
-    const required = [
-      "pair_id",
-      "sample_id",
-      "left",
-      "right",
-      "version_left",
-      "version_right",
-      "type",
-      "group",
-      "display_index"
-    ];
-
-    const missing = required.filter(k => !(k in pair));
-    if (missing.length > 0) {
-      metaEl.textContent = "Error: first pair is missing fields: " + missing.join(", ");
-      return;
-    }
-
-    metaEl.textContent = "";
-
-    leftImg.src = pair.left;
-    rightImg.src = pair.right;
-
-    leftLabel.textContent = "";
-    rightLabel.textContent = "";
-
-    voteLeftBtn.textContent = "Choose Left";
-    voteRightBtn.textContent = "Choose Right";
-
-    const leftHandler = () => submitVote(pair, "left");
-    const rightHandler = () => submitVote(pair, "right");
-
-    voteLeftBtn.onclick = leftHandler;
-    voteRightBtn.onclick = rightHandler;
-    leftImg.onclick = leftHandler;
-    rightImg.onclick = rightHandler;
-
-    leftImg.style.cursor = "pointer";
-    rightImg.style.cursor = "pointer";
-
-    voteSection.classList.remove("hidden");
-    doneSection.classList.add("hidden");
-  }
 
   async function init() {
     try {
-      metaEl.textContent = "Loading manifest...";
-
-      const manifestUrl = new URL("manifest.json", window.location.href).href;
-      console.log("Manifest URL:", manifestUrl);
-
-      const resp = await fetch(manifestUrl, { cache: "no-store" });
-
+      const resp = await fetch("./manifest.json");
       if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+        throw new Error(`Failed to load manifest: ${resp.status}`);
       }
-
-      const text = await resp.text();
-      console.log("Raw manifest text:", text);
-
-      if (!text.trim()) {
-        throw new Error("manifest.json is empty file");
-      }
-
-      manifest = JSON.parse(text);
-
-      console.log("Parsed manifest:", manifest);
-
-      metaEl.textContent = `Manifest loaded. Count: ${
-        Array.isArray(manifest) ? manifest.length : "not array"
-      }`;
-
+      manifest = await resp.json();
       renderCurrentPair();
     } catch (err) {
-      console.error("INIT ERROR:", err);
-      metaEl.textContent = "Init failed: " + err.message;
+      metaEl.textContent = "Failed to load manifest.json";
+      console.error(err);
     }
   }
 
   init();
-</script>
+  </script>
 </body>
 </html>
