@@ -62,6 +62,7 @@
       color: #666;
       margin-bottom: 10px;
       word-break: break-all;
+      min-height: 20px;
     }
     button {
       width: 100%;
@@ -101,7 +102,7 @@
           <img id="left-img" src="" alt="left image" />
         </div>
         <div class="card-body">
-          <div class="card-title" id="left-label">Left Image</div>
+          <div class="card-title" id="left-label"></div>
           <button id="vote-left">Choose Left</button>
         </div>
       </div>
@@ -111,7 +112,7 @@
           <img id="right-img" src="" alt="right image" />
         </div>
         <div class="card-body">
-          <div class="card-title" id="right-label">Right Image</div>
+          <div class="card-title" id="right-label"></div>
           <button id="vote-right">Choose Right</button>
         </div>
       </div>
@@ -122,6 +123,7 @@
     const voteApiUrl = "https://1324234772-0w0hpdmf4r.ap-singapore.tencentscf.com";
     const retryableStatusCodes = new Set([409, 423]);
     const maxSubmitRetries = 5;
+    const revealDelayMs = 1200; // 点击后先显示类别 1.2 秒，再自动进入下一对
 
     const metaEl = document.getElementById("meta");
     const voteSection = document.getElementById("vote-section");
@@ -163,12 +165,30 @@
       }
     }
 
+    function hideLabels() {
+      leftLabel.textContent = "";
+      rightLabel.textContent = "";
+    }
+
+    function revealLabels(pair, choice) {
+      leftLabel.textContent = `Left: ${pair.version_left}`;
+      rightLabel.textContent = `Right: ${pair.version_right}`;
+
+      if (choice === "left") {
+        leftLabel.textContent += " ✓ Selected";
+      } else if (choice === "right") {
+        rightLabel.textContent += " ✓ Selected";
+      }
+    }
+
     function renderPair(pair, progress) {
       currentPair = pair;
       leftImg.src = pair.left;
       rightImg.src = pair.right;
-      leftLabel.textContent = `Left: ${pair.version_left}`;
-      rightLabel.textContent = `Right: ${pair.version_right}`;
+
+      // 进入新 pair 时先不显示类别
+      hideLabels();
+
       updateMeta(progress);
       voteSection.classList.remove("hidden");
     }
@@ -208,6 +228,11 @@
       if (!currentPair || busy) return;
 
       setBusy(true);
+
+      // 先显示类别，再提交
+      revealLabels(currentPair, choice);
+      metaEl.textContent = "Choice recorded. Revealing image categories...";
+      await sleep(revealDelayMs);
 
       for (let attempt = 0; attempt < maxSubmitRetries; attempt++) {
         try {
