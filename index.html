@@ -24,6 +24,7 @@
       text-align: center;
       color: #666;
       margin-bottom: 20px;
+      min-height: 24px;
     }
     .pair-grid {
       display: grid;
@@ -51,6 +52,7 @@
       display: block;
       object-fit: contain;
       max-height: 75vh;
+      cursor: pointer;
     }
     .card-body {
       padding: 14px;
@@ -74,15 +76,12 @@
     button:hover {
       background: #1558b0;
     }
+    button:disabled {
+      background: #97afd4;
+      cursor: not-allowed;
+    }
     .hidden {
       display: none;
-    }
-    .done {
-      text-align: center;
-      padding: 60px 20px;
-      background: white;
-      border-radius: 16px;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.08);
     }
     @media (max-width: 900px) {
       .pair-grid {
@@ -117,171 +116,150 @@
         </div>
       </div>
     </div>
-
-    <div id="done-section" class="done hidden">
-      <h2>All Done! Thank you for voting</h2>
-      <p>Your selections have been recorded.</p>
-    </div>
   </div>
 
   <script>
-  const voteApiUrl = "https://1324234772-0xoqg4rpth.ap-singapore.tencentscf.com";
-  // Leave empty if backend is not connected to avoid fetch errors
+    const voteApiUrl = "https://1324234772-0w0hpdmf4r.ap-singapore.tencentscf.com";
+    const retryableStatusCodes = new Set([409, 423]);
+    const maxSubmitRetries = 5;
 
-  let manifest = [];
+    const metaEl = document.getElementById("meta");
+    const voteSection = document.getElementById("vote-section");
 
-  const metaEl = document.getElementById("meta");
-  const voteSection = document.getElementById("vote-section");
-  const doneSection = document.getElementById("done-section");
+    const leftImg = document.getElementById("left-img");
+    const rightImg = document.getElementById("right-img");
+    const leftLabel = document.getElementById("left-label");
+    const rightLabel = document.getElementById("right-label");
+    const voteLeftBtn = document.getElementById("vote-left");
+    const voteRightBtn = document.getElementById("vote-right");
 
-  const leftImg = document.getElementById("left-img");
-  const rightImg = document.getElementById("right-img");
-  const leftLabel = document.getElementById("left-label");
-  const rightLabel = document.getElementById("right-label");
-  const voteLeftBtn = document.getElementById("vote-left");
-  const voteRightBtn = document.getElementById("vote-right");
+    let currentPair = null;
+    let busy = false;
 
-  function getOrCreateUserId() {
-    let uid = localStorage.getItem("vote_user_id");
-    if (!uid) {
-      uid = crypto.randomUUID();
-      localStorage.setItem("vote_user_id", uid);
-    }
-    return uid;
-  }
-
-  function getVotedPairs() {
-    return JSON.parse(localStorage.getItem("voted_pairs") || "[]");
-  }
-
-  function setVotedPair(pairId) {
-    const voted = new Set(getVotedPairs());
-    voted.add(pairId);
-    localStorage.setItem("voted_pairs", JSON.stringify([...voted]));
-  }
-
-  function getRemainingPairs(allPairs) {
-    const voted = new Set(getVotedPairs());
-    return allPairs.filter(p => !voted.has(p.pair_id));
-  }
-
-  function renderCurrentPair() {
-    const remaining = getRemainingPairs(manifest);
-
-    if (remaining.length === 0) {
-      localStorage.removeItem("voted_pairs");
-
-      renderCurrentPair();
-      return;
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    const pair = remaining[0];
+    function setBusy(flag) {
+      busy = flag;
+      voteLeftBtn.disabled = flag;
+      voteRightBtn.disabled = flag;
+    }
 
-    metaEl.textContent = "";
-
-    leftImg.src = pair.left;
-    rightImg.src = pair.right;
-
-    leftLabel.textContent = "";
-    rightLabel.textContent = "";
-
-    voteLeftBtn.textContent = "Choose Left";
-    voteRightBtn.textContent = "Choose Right";
-
-    const leftHandler = () => submitVote(pair, "left");
-    const rightHandler = () => submitVote(pair, "right");
-
-    voteLeftBtn.onclick = leftHandler;
-    voteRightBtn.onclick = rightHandler;
-
-    leftImg.onclick = leftHandler;
-    rightImg.onclick = rightHandler;
-
-    leftImg.style.cursor = "pointer";
-    rightImg.style.cursor = "pointer";
-
-    voteSection.classList.remove("hidden");
-    doneSection.classList.add("hidden");
-  }
-
-  async function submitVote(pair, choice) {
-    const chosenVersion =
-      choice === "left" ? pair.version_left : pair.version_right;
-
-    const payload = {
-      user_id: getOrCreateUserId(),
-      pair_id: pair.pair_id,
-      sample_id: pair.sample_id,
-      choice: choice,
-      chosen_version: chosenVersion,
-      left: pair.left,
-      right: pair.right,
-      type: pair.type,
-      group: pair.group,
-      version_left: pair.version_left,
-      version_right: pair.version_right,
-      display_index: pair.display_index,
-      timestamp: new Date().toISOString()
-    };
-
-    try {
-      if (voteApiUrl) {
-        const resp = await fetch(voteApiUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-
-        if (!resp.ok) {
-          throw new Error(`Backend returned status ${resp.status}`);
-        }
+    function updateMeta(progress) {
+      if (!progress) {
+        metaEl.textContent = "";
+        return;
       }
 
-      setVotedPair(pair.pair_id);
+      const evaluated = progress.evaluated_count ?? 0;
+      const total = progress.total_count ?? 0;
+      const allEvaluated = progress.all_evaluated ?? false;
 
+      if (allEvaluated) {
+        metaEl.textContent = `All pairs have been evaluated. Returning to the first pair. (${evaluated}/${total})`;
+      } else {
+        metaEl.textContent = `Progress: ${evaluated}/${total}`;
+      }
+    }
+
+    function renderPair(pair, progress) {
+      currentPair = pair;
+      leftImg.src = pair.left;
+      rightImg.src = pair.right;
       leftLabel.textContent = `Left: ${pair.version_left}`;
       rightLabel.textContent = `Right: ${pair.version_right}`;
-
-      if (choice === "left") {
-        voteLeftBtn.textContent = `You chose Left (${pair.version_left})`;
-        voteRightBtn.textContent = "Not selected";
-      } else {
-        voteRightBtn.textContent = `You chose Right (${pair.version_right})`;
-        voteLeftBtn.textContent = "Not selected";
-      }
-
-      voteLeftBtn.disabled = true;
-      voteRightBtn.disabled = true;
-      leftImg.onclick = null;
-      rightImg.onclick = null;
-
-      setTimeout(() => {
-        voteLeftBtn.disabled = false;
-        voteRightBtn.disabled = false;
-        renderCurrentPair();
-      }, 1000);
-
-    } catch (err) {
-      alert("Submission failed: " + err.message);
-      console.error(err);
+      updateMeta(progress);
+      voteSection.classList.remove("hidden");
     }
-  }
 
-  async function init() {
-    try {
-      const resp = await fetch("./manifest.json");
-      if (!resp.ok) {
-        throw new Error(`Failed to load manifest: ${resp.status}`);
+    async function parseResponse(resp) {
+      const text = await resp.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return { ok: false, error: text || `HTTP ${resp.status}` };
       }
-      manifest = await resp.json();
-      renderCurrentPair();
-    } catch (err) {
-      metaEl.textContent = "Failed to load manifest.json";
-      console.error(err);
     }
-  }
 
-  init();
+    async function loadCurrentPair() {
+      try {
+        setBusy(true);
+        metaEl.textContent = "Loading current pair...";
+
+        const resp = await fetch(voteApiUrl, { method: "GET" });
+        const data = await parseResponse(resp);
+
+        if (!resp.ok || !data.ok || !data.pair) {
+          throw new Error(data.error || `Backend returned status ${resp.status}`);
+        }
+
+        renderPair(data.pair, data.progress);
+      } catch (err) {
+        metaEl.textContent = "Failed to load current pair";
+        console.error(err);
+        alert("Load failed: " + err.message);
+      } finally {
+        setBusy(false);
+      }
+    }
+
+    async function submitVote(choice) {
+      if (!currentPair || busy) return;
+
+      setBusy(true);
+
+      for (let attempt = 0; attempt < maxSubmitRetries; attempt++) {
+        try {
+          metaEl.textContent = attempt === 0
+            ? "Submitting vote..."
+            : `Vote is temporarily locked. Retrying (${attempt}/${maxSubmitRetries - 1})...`;
+
+          const resp = await fetch(voteApiUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              pair_id: currentPair.pair_id,
+              choice
+            })
+          });
+
+          const data = await parseResponse(resp);
+
+          if (!resp.ok) {
+            if (retryableStatusCodes.has(resp.status) && attempt < maxSubmitRetries - 1) {
+              await sleep(300 + attempt * 250);
+              continue;
+            }
+            throw new Error(data.error || `Backend returned status ${resp.status}`);
+          }
+
+          if (!data.ok || !data.next_pair) {
+            throw new Error(data.error || "Failed to submit vote");
+          }
+
+          renderPair(data.next_pair, data.progress);
+          setBusy(false);
+          return;
+        } catch (err) {
+          if (attempt >= maxSubmitRetries - 1) {
+            console.error(err);
+            alert("Submission failed: " + err.message);
+            updateMeta(null);
+            setBusy(false);
+            return;
+          }
+          await sleep(300 + attempt * 250);
+        }
+      }
+    }
+
+    voteLeftBtn.onclick = () => submitVote("left");
+    voteRightBtn.onclick = () => submitVote("right");
+    leftImg.onclick = () => submitVote("left");
+    rightImg.onclick = () => submitVote("right");
+
+    loadCurrentPair();
   </script>
 </body>
 </html>
